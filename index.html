@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="en" style="scroll-behavior: smooth;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>News Shield | AI Fact-Checker</title>
+    <!-- Add App Icon (Favicon) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    
+    <!-- FIREBASE SDKS -->
+    <script type="module">
+        // Module will read __firebase_config and __initial_auth_token below if provided
+
+        // Use dynamic imports for Firebase so the page degrades gracefully when
+        // opened via `file://` or when network/imports fail in development.
+        let initializeApp, getAuth, signInAnonymously, signInWithCustomToken;
+        try {
+            const firebaseAppModule = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js');
+            const firebaseAuthModule = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js');
+            initializeApp = firebaseAppModule.initializeApp;
+            getAuth = firebaseAuthModule.getAuth;
+            signInAnonymously = firebaseAuthModule.signInAnonymously;
+            signInWithCustomToken = firebaseAuthModule.signInWithCustomToken;
+        } catch (err) {
+            console.warn('Firebase dynamic import failed. Firebase features will be disabled in this environment.', err);
+        }
+
+        // --- Setup Firebase and Authentication ---
+        // Safely resolve firebase config whether it's provided as an object or a JSON string
+        let firebaseConfig = {};
+        if (typeof __firebase_config !== 'undefined') {
+            if (typeof __firebase_config === 'string') {
+                try {
+                    firebaseConfig = JSON.parse(__firebase_config);
+                } catch (e) {
+                    console.warn('Failed to parse __firebase_config string, using empty config.', e);
+                    firebaseConfig = {};
+                }
+            } else if (typeof __firebase_config === 'object' && __firebase_config !== null) {
+                firebaseConfig = __firebase_config;
+            }
+        }
+        const __initial_auth_token = typeof window.__initial_auth_token !== 'undefined' ? window.__initial_auth_token : undefined;
+
+        let auth;
+        if (typeof initializeApp === 'function' && typeof getAuth === 'function') {
+            try {
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                if (__initial_auth_token && typeof signInWithCustomToken === 'function') {
+                    signInWithCustomToken(auth, __initial_auth_token);
+                } else if (typeof signInAnonymously === 'function') {
+                    signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error('Firebase Initialization Error:', error);
+            }
+        } else {
+            console.info('Firebase not initialized (imports unavailable). Continuing without Firebase.');
+        }
+    </script>
+    
+    <style>
+        /* Custom styles for a deep dark theme */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0c0a09; /* Deep stone black */
+            padding-top: 4.5rem; /* Space for fixed navbar */
+        }
+        /* Custom scrollbar for better aesthetics */
+        body::-webkit-scrollbar {
+            width: 8px;
+        }
+        body::-webkit-scrollbar-thumb {
+            background-color: #4f46e5;
+            border-radius: 4px;
+        }
+        body::-webkit-scrollbar-track {
+            background: #1c1917;
+        }
+        /* Style for the textarea and card background */
+        .app-card {
+            background-color: #1c1917; /* Darker gray background */
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        textarea, input[type="text"] {
+            /* Match Tailwind classes, but override default focus styles */
+            border: 2px solid #44403c !important; 
+            background-color: #292524 !important;
+            color: #f5f5f4 !important;
+            transition: all 0.2s;
+            resize: none;
+            border-radius: 0.5rem; /* rounded-lg */
+            padding: 1rem; /* p-4 */
+        }
+        textarea:focus, input[type="text"]:focus {
+            outline: none !important;
+            border-color: #4f46e5 !important;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.5);
+        }
+        /* Pulsating animation for loading state */
+        .pulsate {
+            animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        /* Fixed Navbar */
+        .sticky-nav {
+            position: fixed; /* make navbar fixed so it stays visible */
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 9999;
+            backdrop-filter: blur(6px);
+            background-color: rgba(15, 12, 10, 0.95); /* semi-opaque to show above content */
+        }
+
+        /* --- AI Agent Chat Specific Styles --- */
+        #ai-agent-button {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            z-index: 100;
+        }
+        #chat-window {
+            position: fixed;
+            bottom: 7rem; /* Above the button */
+            right: 2rem;
+            width: 90vw;
+            max-width: 380px;
+            height: 80vh;
+            max-height: 500px;
+            z-index: 99;
+            transform: scale(0.95);
+            transform-origin: bottom right;
+            transition: all 0.3s ease-in-out;
+        }
+        #chat-window.hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.9);
+        }
+        .chat-message-user {
+            background-color: #4f46e5; /* Indigo */
+            align-self: flex-end;
+        }
+        .chat-message-ai {
+            background-color: #292524; /* Dark Stone */
+            align-self: flex-start;
+        }
+        /* Ensure chat input matches other inputs */
+        #chat-input-text {
+            border: none !important;
+            background-color: #1c1917 !important;
+            padding: 0.75rem 1rem !important;
+            border-radius: 0.5rem 0 0 0.5rem !important;
+        }
+        #chat-input-text:focus {
+            box-shadow: none !important;
+        }
+        /* Mobile adjustment */
+        @media (max-width: 640px) {
+            #ai-agent-button {
+                bottom: 1rem;
+                right: 1rem;
+            }
+            #chat-window {
+                bottom: 6rem;
+                right: 1rem;
+                width: calc(100% - 2rem);
+            }
+        }
+    </style>
+</head>
+<body class="text-stone-100 min-h-screen">
+
+    <!-- Navbar -->
+    <nav class="sticky-nav bg-gray-900 shadow-xl border-b border-indigo-900/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <!-- Logo -->
+                <div class="flex items-center">
+                    <a href="#home" class="flex-shrink-0 text-xl font-bold text-indigo-400 hover:text-indigo-300 transition duration-150">
+                        News Shield 🛡️
+                    </a>
+                </div>
+                <!-- Desktop Menu -->
+                <div class="hidden md:flex md:items-center md:space-x-6">
+                    <div class="flex items-baseline space-x-4">
+                        <a href="#home" class="text-stone-300 hover:bg-indigo-700/50 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition">Home</a>
+                        <a href="#detector" class="text-stone-300 hover:bg-indigo-700/50 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition">Detector</a>
+                        <a href="#about" class="text-stone-300 hover:bg-indigo-700/50 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition">About Us</a>
+                        <a href="#blog" class="text-stone-300 hover:bg-indigo-700/50 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition">Blog</a>
+                    </div>
+                </div>
+                <!-- Mobile Menu Button -->
+                <div class="-mr-2 flex md:hidden">
+                    <button type="button" id="mobile-menu-button" class="inline-flex items-center justify-center p-2 rounded-md text-stone-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white">
+                        <svg class="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Menu (Hidden by default) -->
+        <div class="md:hidden hidden" id="mobile-menu">
+            <div class="px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-indigo-900/50">
+                <a href="#home" class="text-stone-300 hover:bg-indigo-700/50 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Home</a>
+                <a href="#detector" class="text-stone-300 hover:bg-indigo-700/50 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Detector</a>
+                <a href="#about" class="text-stone-300 hover:bg-indigo-700/50 hover:text-white block px-3 py-2 rounded-md text-base font-medium">About Us</a>
+                <a href="#blog" class="text-stone-300 hover:bg-indigo-700/50 hover:text-white block px-3 py-2 rounded-md text-base font-medium">Blog</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="p-4 sm:p-8">
+        
+        <!-- 1. Hero Section -->
+        <section id="home" class="max-w-4xl mx-auto text-center py-20 sm:py-28">
+            <h1 class="text-6xl sm:text-7xl font-extrabold text-indigo-400 mb-4 tracking-tight">
+                Trust, Verified.
+            </h1>
+            <p class="text-xl sm:text-2xl text-stone-300 mb-8 max-w-2xl mx-auto">
+                Stop the spread of misinformation with News Shield, your AI-Powered Multimodal Fact-Checker for text, links, images, and video.
+            </p>
+            <a href="#detector" class="inline-block bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-8 rounded-lg transition duration-300 transform hover:scale-105 shadow-xl shadow-indigo-900/50">
+                Start Analysis Now →
+            </a>
+        </section>
+
+        <!-- 2. Detector Section -->
+        <section id="detector" class="max-w-4xl mx-auto py-12 sm:py-16">
+            <header class="text-center mb-10">
+                <h2 class="text-4xl font-bold text-stone-200 mb-2 border-b border-indigo-700/50 pb-3 inline-block">Multimodal Detector</h2>
+            </header>
+            
+            <div class="app-card p-6 sm:p-8 rounded-xl border border-stone-700">
+                <h3 class="text-2xl font-bold mb-4 text-stone-200 border-b border-stone-700 pb-3">
+                    Input Content for Analysis
+                </h3>
+                
+                <!-- Input Type Selector Tabs -->
+                <div class="flex space-x-2 p-1 bg-stone-800 rounded-lg mb-4">
+                    <button type="button" data-input-type="text" class="input-tab w-1/4 py-2 px-4 rounded-md font-semibold bg-indigo-600 text-white transition duration-150">Text</button>
+                    <button type="button" data-input-type="url" class="input-tab w-1/4 py-2 px-4 rounded-md font-semibold text-stone-300 hover:bg-stone-700 transition duration-150">Link (Article)</button>
+                    <button type="button" data-input-type="image" class="input-tab w-1/4 py-2 px-4 rounded-md font-semibold text-stone-300 hover:bg-stone-700 transition duration-150">Image URL</button>
+                    <button type="button" data-input-type="video" class="input-tab w-1/4 py-2 px-4 rounded-md font-semibold text-stone-300 hover:bg-stone-700 transition duration-150">Video URL</button>
+                </div>
+
+                <!-- Input Containers -->
+                <div id="input-container-text" data-type="text">
+                    <label for="news-input" class="block text-sm font-medium text-stone-400 mb-2">
+                        Paste the full article text here:
+                    </label>
+                    <textarea id="news-input" rows="10" 
+                              class="w-full"
+                              placeholder="E.g., 'URGENT ALERT: New scientific study proves wearing socks inside out boosts IQ by 50 points, according to a single anonymous source...'"></textarea>
+                </div>
+
+                <div id="input-container-url" data-type="url" class="hidden">
+                    <label for="url-input" class="block text-sm font-medium text-stone-400 mb-2">
+                        Paste the news article link (URL) here:
+                    </label>
+                    <input type="text" id="url-input" class="w-full" placeholder="E.g., https://unreliable-source.com/shocking-claims-2025">
+                </div>
+
+                <div id="input-container-image" data-type="image" class="hidden">
+                    <label for="image-input" class="block text-sm font-medium text-stone-400 mb-2">
+                        Paste the direct image link (URL) here:
+                    </label>
+                    <input type="text" id="image-input" class="w-full" placeholder="E.g., https://placehold.co/800x400/1c1917/f5f5f4?text=Placeholder+Image">
+                    <div id="image-preview" class="mt-4 w-full h-48 bg-stone-800 rounded-lg flex items-center justify-center text-stone-500 italic hidden">Image Preview</div>
+                </div>
+
+                <div id="input-container-video" data-type="video" class="hidden">
+                    <label for="video-input" class="block text-sm font-medium text-stone-400 mb-2">
+                        Paste the video link (YouTube, social media, etc.) here:
+                    </label>
+                    <input type="text" id="video-input" class="w-full" placeholder="E.g., https://youtube.com/watch?v=misinformation_clip">
+                    <div id="video-placeholder" class="mt-4 w-full h-48 bg-stone-800 rounded-lg flex flex-col items-center justify-center text-stone-500 italic hidden">
+                        <svg class="w-10 h-10 mb-2 text-indigo-400" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path></svg>
+                        Simulated Video Analysis Ready (Requires Server-Side Processing)
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="mt-4 flex flex-col sm:flex-row gap-3">
+                    <button id="analyze-button" 
+                            class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-6 rounded-lg transition duration-200 transform hover:scale-[1.01] shadow-lg shadow-indigo-900/50">
+                        🚀 Analyze Content
+                    </button>
+                    <button onclick="loadExample(false)" 
+                            class="sm:w-1/4 bg-stone-700 hover:bg-stone-600 text-stone-200 font-medium py-3 px-4 rounded-lg transition duration-200">
+                        Load Fake Text
+                    </button>
+                    <button onclick="loadExample(true)" 
+                            class="sm:w-1/4 bg-stone-700 hover:bg-stone-600 text-stone-200 font-medium py-3 px-4 rounded-lg transition duration-200">
+                        Load Real Text
+                    </button>
+                </div>
+            </div>
+
+            <!-- Result Area (Initially hidden) -->
+            <div id="loading-area" class="mt-8 hidden text-center">
+                <div class="flex items-center justify-center p-4 app-card rounded-xl border border-indigo-500/50 pulsate">
+                    <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-lg text-indigo-300">Analyzing content... Please wait.</span>
+                </div>
+            </div>
+
+            <div id="result-area" class="mt-8 hidden">
+                <!-- Content populated by JavaScript -->
+            </div>
+        </section>
+
+        <!-- 3. How It Works Section -->
+        <section id="how-it-works" class="max-w-4xl mx-auto py-12 sm:py-16 border-t border-stone-800">
+            <header class="text-center mb-10">
+                <h2 class="text-4xl font-bold text-stone-200 mb-2 border-b border-indigo-700/50 pb-3 inline-block">How It Works</h2>
+            </header>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
+                <div class="app-card p-6 rounded-xl border border-stone-700 transition hover:border-indigo-500">
+                    <div class="text-indigo-400 text-4xl mb-3">1️⃣</div>
+                    <h4 class="font-bold text-xl mb-2">Data Ingestion</h4>
+                    <p class="text-stone-400 text-sm">Input data (text, URL, image, or video) is securely ingested and pre-processed for feature extraction.</p>
+                </div>
+                <div class="app-card p-6 rounded-xl border border-stone-700 transition hover:border-indigo-500">
+                    <div class="text-indigo-400 text-4xl mb-3">2️⃣</div>
+                    <h4 class="font-bold text-xl mb-2">AI Scoring & Grounding</h4>
+                    <p class="text-stone-400 text-sm">The AI model analyzes content quality, sensationalism, and cross-references external data (simulated citation proof).</p>
+                </div>
+                <div class="app-card p-6 rounded-xl border border-stone-700 transition hover:border-indigo-500">
+                    <div class="text-indigo-400 text-4xl mb-3">3️⃣</div>
+                    <h4 class="font-bold text-xl mb-2">Verdict & Transparency</h4>
+                    <p class="text-stone-400 text-sm">A final verdict and confidence score are provided, backed by transparent technical details and grounding sources.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. About Us Section -->
+        <section id="about" class="max-w-4xl mx-auto py-12 sm:py-16 border-t border-stone-800">
+            <header class="text-center mb-10">
+                <h2 class="text-4xl font-bold text-stone-200 mb-2 border-b border-indigo-700/50 pb-3 inline-block">About News Shield</h2>
+            </header>
+            
+            <div class="app-card p-8 rounded-xl border border-stone-700">
+                <h4 class="text-2xl font-semibold text-indigo-400 mb-4">Our Mission: Restoring Digital Trust</h4>
+                <p class="text-stone-300 mb-6 leading-relaxed">
+                    News Shield was founded on the principle that informed citizens are essential for a healthy society. In an age flooded with digital content, separating fact from fiction is harder than ever. We aim to equip users with powerful, intelligent tools that can instantly flag potentially misleading content across multiple media types—from clickbait headlines to manipulated images.
+                </p>
+                
+                <h5 class="text-2xl font-semibold text-stone-200 mb-4 border-t border-stone-700 pt-4 mt-6">Meet the Core Team</h5>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 text-center">
+                    <!-- AAYUSHI GAUR -->
+                    <div class="p-4 rounded-lg bg-stone-800/50">
+                        <div class="text-4xl mb-2">👩‍💻</div>
+                        <h6 class="font-bold text-lg text-indigo-300">AAYUSHI GAUR</h6>
+                        <p class="text-sm text-stone-400">NLP & Machine Learning Engineer</p>
+                        <p class="text-xs text-stone-500 mt-1">(Python, Scikit-learn, TF-IDF)</p>
+                    </div>
+                    <!-- AKSHRA SHARMA -->
+                    <div class="p-4 rounded-lg bg-stone-800/50">
+                        <div class="text-4xl mb-2">🎨</div>
+                        <h6 class="font-bold text-lg text-indigo-300">AKSHRA SHARMA</h6>
+                        <p class="text-sm text-stone-400">Frontend & UI/UX Designer</p>
+                        <p class="text-xs text-stone-500 mt-1">(HTML, Tailwind CSS, JavaScript)</p>
+                    </div>
+                    <!-- AMAN SHARMA -->
+                    <div class="p-4 rounded-lg bg-stone-800/50">
+                        <div class="text-4xl mb-2">💻</div>
+                        <h6 class="font-bold text-lg text-indigo-300">AMAN SHARMA</h6>
+                        <p class="text-sm text-stone-400">Backend & Deployment Specialist</p>
+                        <p class="text-xs text-stone-500 mt-1">(Python, Streamlit, API Integration)</p>
+                    </div>
+                    <!-- HARSHIT SAHU -->
+                    <div class="p-4 rounded-lg bg-stone-800/50">
+                        <div class="text-4xl mb-2">🧠</div>
+                        <h6 class="font-bold text-lg text-indigo-300">HARSHIT SAHU</h6>
+                        <p class="text-sm text-stone-400">Multimodal Research Lead</p>
+                        <p class="text-xs text-stone-500 mt-1">(Gemini API, Data Grounding)</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 5. Blog Section -->
+        <section id="blog" class="max-w-4xl mx-auto py-12 sm:py-16 border-t border-stone-800">
+            <header class="text-center mb-8">
+                <h2 class="text-4xl font-bold text-stone-200 mb-2 border-b border-indigo-700/50 pb-3 inline-block">From the Blog</h2>
+                <p class="text-stone-400">Latest articles, research highlights, and transparency reports.</p>
+            </header>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <article class="app-card p-6 rounded-xl border border-stone-700">
+                    <h3 class="text-xl font-semibold text-indigo-300">Understanding AI Fact-Checking</h3>
+                    <p class="text-sm text-stone-400 mt-2">A short primer on how machine learning models analyze text and multimodal signals to produce transparent verdicts.</p>
+                    <a href="#" class="text-indigo-400 text-sm mt-3 inline-block">Read more →</a>
+                </article>
+                <article class="app-card p-6 rounded-xl border border-stone-700">
+                    <h3 class="text-xl font-semibold text-indigo-300">Tools For Community Reporting</h3>
+                    <p class="text-sm text-stone-400 mt-2">Guidelines and tools to empower users to report suspicious content responsibly.</p>
+                    <a href="#" class="text-indigo-400 text-sm mt-3 inline-block">Read more →</a>
+                </article>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 border-t border-indigo-900/50 mt-12 py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-stone-400">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-8">
+                <!-- Column 1: Brand -->
+                <div>
+                    <h5 class="text-lg font-bold text-indigo-400 mb-3">News Shield</h5>
+                    <p class="text-sm">
+                        AI Fact-Checking Solutions for the Digital Age.
+                    </p>
+                </div>
+                <!-- Column 2: Navigation -->
+                <div>
+                    <h5 class="text-lg font-semibold text-stone-200 mb-3">Quick Links</h5>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="#detector" class="hover:text-white transition">Detector Tool</a></li>
+                        <li><a href="#about" class="hover:text-white transition">About Us</a></li>
+                        <li><a href="#blog" class="hover:text-white transition">Blog</a></li>
+                    </ul>
+                </div>
+                <!-- Column 3: Legal -->
+                <div>
+                    <h5 class="text-lg font-semibold text-stone-200 mb-3">Legal</h5>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="#" class="hover:text-white transition">Terms of Service (Mock)</a></li>
+                        <li><a href="#" class="hover:text-white transition">Privacy Policy (Mock)</a></li>
+                    </ul>
+                </div>
+                <!-- Column 4: Contact -->
+                <div>
+                    <h5 class="text-lg font-semibold text-stone-200 mb-3">Contact</h5>
+                    <p class="text-sm">support@newsshield.ai</p>
+                    <p class="text-sm">info@newsshield.ai</p>
+                </div>
+            </div>
+            
+            <div class="mt-8 pt-6 border-t border-stone-800 text-center text-sm">
+                &copy; 2025 News Shield, Inc. All rights reserved.
+            </div>
+        </div>
+    </footer>
+    
+    <!-- AI Agent Chat Button -->
+    <button id="ai-agent-button" class="bg-indigo-600 hover:bg-indigo-500 text-white p-4 rounded-full shadow-2xl transition duration-300 transform hover:scale-110">
+        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 4v-4z" />
+        </svg>
+    </button>
+
+    <!-- AI Agent Chat Window -->
+    <div id="chat-window" class="app-card rounded-xl shadow-2xl flex flex-col hidden border border-stone-700">
+        <!-- Chat Header -->
+        <div class="bg-indigo-600 p-4 rounded-t-xl flex justify-between items-center">
+            <span class="font-bold text-white">News Shield AI Assistant</span>
+            <button onclick="document.getElementById('ai-agent-button').click()" class="text-white hover:text-indigo-200">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+        <!-- Chat Body -->
+        <div id="chat-body" class="flex-1 p-4 overflow-y-auto space-y-4">
+            <!-- Initial AI message -->
+            <div class="flex">
+                <div class="chat-message-ai p-3 rounded-xl max-w-[80%] text-sm">
+                    Hello! I'm the News Shield AI Assistant. I can quickly explain how this detector works, or clarify a result using Gemini AI. Just ask!
+                </div>
+            </div>
+        </div>
+        <!-- Chat Footer (Input) -->
+        <div class="p-2 border-t border-stone-700 flex rounded-b-xl">
+            <input type="text" id="chat-input-text" placeholder="Ask a question..." class="flex-1 w-full rounded-l-lg focus:ring-0">
+            <button id="chat-send-button" class="bg-indigo-600 hover:bg-indigo-500 text-white p-3 rounded-r-lg transition duration-150">
+                <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+
+    <script>
+        const newsInput = document.getElementById('news-input');
+        const urlInput = document.getElementById('url-input');
+        const imageInput = document.getElementById('image-input');
+        const videoInput = document.getElementById('video-input');
+        const analyzeButton = document.getElementById('analyze-button');
+        const loadingArea = document.getElementById('loading-area');
+        const resultArea = document.getElementById('result-area');
+        const inputContainers = document.querySelectorAll('[data-type]');
+        const inputTabs = document.querySelectorAll('.input-tab');
+        const imagePreview = document.getElementById('image-preview');
+        const videoPlaceholder = document.getElementById('video-placeholder');
+        const mobileMenuButton = document.getElementById('mobile-menu-button');
+        const mobileMenu = document.getElementById('mobile-menu');
+        
+        // AI Agent elements
+        const aiAgentButton = document.getElementById('ai-agent-button');
+        const chatWindow = document.getElementById('chat-window');
+        const chatBody = document.getElementById('chat-body');
+        const chatInputText = document.getElementById('chat-input-text');
+        const chatSendButton = document.getElementById('chat-send-button');
+
+
+        let currentInputType = 'text';
+
+        // --- Gemini API Utilities ---
+        
+        const API_MODEL = 'gemini-2.5-flash-preview-09-2025';
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent?key=`;
+        const apiKey = ""; // Canvas runtime provides key if needed
+
+        async function fetchGemini(systemInstruction, userQuery) {
+            let delay = 1000;
+            const maxRetries = 5;
+
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const payload = {
+                        contents: [{ parts: [{ text: userQuery }] }],
+                        tools: [{ "google_search": {} }],
+                        systemInstruction: { parts: [{ text: systemInstruction }] },
+                    };
+
+                    const response = await fetch(API_URL + apiKey, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429) {
+                        throw new Error('Rate limit exceeded');
+                    }
+
+                    const result = await response.json();
+                    
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "Error: AI response structure invalid.";
+                    
+                    return text;
+
+                } catch (error) {
+                    if (error.message === 'Rate limit exceeded' && i < maxRetries - 1) {
+                        // Exponential backoff
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2;
+                    } else {
+                        console.error("Gemini API call failed:", error);
+                        return `Error: Could not connect to AI service. Details: ${error.message}`;
+                    }
+                }
+            }
+            return "Error: Maximum API retries reached. Please try again later.";
+        }
+
+        async function fetchGeminiStructured(userQuery, schema) {
+            let delay = 1000;
+            const maxRetries = 5;
+            
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const payload = {
+                        contents: [{ parts: [{ text: userQuery }] }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: schema
+                        },
+                    };
+
+                    const response = await fetch(API_URL + apiKey, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429) {
+                        throw new Error('Rate limit exceeded');
+                    }
+                    
+                    const result = await response.json();
+                    
+                    const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (jsonText) {
+                        return JSON.parse(jsonText);
+                    }
+                    
+                    return null;
+
+                } catch (error) {
+                    if (error.message === 'Rate limit exceeded' && i < maxRetries - 1) {
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2;
+                    } else {
+                        console.error("Gemini Structured API call failed:", error);
+                        return null;
+                    }
+                }
+            }
+            return null;
+        }
+
+        // --- Mobile Menu Toggle ---
+        mobileMenuButton.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
+        });
+        document.querySelectorAll('#mobile-menu a').forEach(item => {
+            item.addEventListener('click', () => mobileMenu.classList.add('hidden'));
+        });
+
+
+        // --- Input Mode Toggling ---
+
+        function switchInputMode(newType) {
+            currentInputType = newType;
+            
+            // 1. Hide all containers and reset tab styles
+            inputContainers.forEach(container => container.classList.add('hidden'));
+            imagePreview.classList.add('hidden'); 
+            videoPlaceholder.classList.add('hidden'); 
+
+            inputTabs.forEach(tab => {
+                tab.classList.remove('bg-indigo-600', 'text-white');
+                tab.classList.add('text-stone-300', 'hover:bg-stone-700');
+            });
+
+            // 2. Show the active container and set active tab style
+            const activeContainer = document.getElementById(`input-container-${newType}`);
+            const activeTab = document.querySelector(`.input-tab[data-input-type="${newType}"]`);
+            
+            if (activeContainer) activeContainer.classList.remove('hidden');
+            if (activeTab) {
+                activeTab.classList.add('bg-indigo-600', 'text-white');
+                activeTab.classList.remove('text-stone-300', 'hover:bg-stone-700');
+            }
+            
+            // Specific show logic for multimodal inputs
+            if (newType === 'image' && imageInput.value.trim()) {
+                imageInput.dispatchEvent(new Event('input')); 
+            } else if (newType === 'video' && videoInput.value.trim()) {
+                videoPlaceholder.classList.remove('hidden');
+            }
+
+            // Clear result/loading areas
+            loadingArea.classList.add('hidden');
+            resultArea.classList.add('hidden');
+            resultArea.innerHTML = '';
+        }
+
+        // Initialize tabs
+        inputTabs.forEach(tab => {
+            tab.addEventListener('click', () => switchInputMode(tab.getAttribute('data-input-type')));
+        });
+        
+        // Image Preview Handler
+        imageInput.addEventListener('input', () => {
+            const url = imageInput.value.trim();
+            imagePreview.innerHTML = 'Image Preview';
+            imagePreview.classList.add('hidden');
+            
+            if (url && (url.startsWith('http') || url.startsWith('data:'))) {
+                imagePreview.classList.remove('hidden');
+                imagePreview.innerHTML = '';
+                const img = new Image();
+                
+                // Show a loading indicator during fetch attempt
+                imagePreview.innerHTML = '<span class="text-indigo-400">Loading image...</span>';
+                
+                img.onload = () => {
+                    imagePreview.style.backgroundImage = `url('${url}')`;
+                    imagePreview.style.backgroundSize = 'contain';
+                    imagePreview.style.backgroundPosition = 'center';
+                    imagePreview.style.backgroundRepeat = 'no-repeat';
+                    imagePreview.innerHTML = ''; // Clear loading text
+                };
+                img.onerror = () => {
+                    imagePreview.innerHTML = '⚠️ Failed to load image URL. Check CORS or URL validity.';
+                    imagePreview.style.backgroundImage = 'none';
+                    imagePreview.style.backgroundSize = 'initial';
+                    imagePreview.style.backgroundPosition = 'center';
+                };
+                img.src = url;
+            }
+        });
+
+        // Video Placeholder Handler
+        videoInput.addEventListener('input', () => {
+            const url = videoInput.value.trim();
+            if (url) {
+                videoPlaceholder.classList.remove('hidden');
+            } else {
+                videoPlaceholder.classList.add('hidden');
+            }
+        });
+
+
+        // --- Mock Detection Logic (Updated to return mock citations) ---
+
+        function detectFakeNews(type, content) {
+            if (!content) {
+                return { prediction: 0, confidence: 0.5, type: type, messageType: 'empty', citations: [], rawContent: content };
+            }
+            
+            let probReal = 0.5;
+            let citations = [];
+            
+            if (type === 'text') {
+                const lowerText = content.toLowerCase();
+                const sensationalWords = ["shocking", "bombshell", "must-see", "disaster", "urgent alert", "massive cover-up", "fake news", "secretly", "experts agree", "share this immediately", "reveals all", "exposed", "scandal", "breaking now", "lie", "fraud"];
+                const sensationalCount = sensationalWords.filter(word => lowerText.includes(word)).length;
+                const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
+
+                probReal = 0.5;
+                probReal -= (sensationalCount * 0.07); // More aggressive
+                
+                if (wordCount < 100) probReal -= 0.15;
+                else if (wordCount > 300) probReal += 0.10;
+                
+                citations = [
+                    { title: "FactCheck.org: Analysis of Viral Claims", uri: "https://factcheck.org/mock-claim-text" },
+                    { title: "Stylometric Study on Misinformation (Journal of AI)", uri: "https://journals.ai/mock-stylometry-report" },
+                ];
+
+            } else if (type === 'url') {
+                const suspiciousDomains = ['clickbait.net', 'thetruthseeker.info', 'conspiracydaily.com', 'anonymousblog.xyz'];
+                const hasSuspiciousDomain = suspiciousDomains.some(domain => content.includes(domain));
+
+                probReal = 0.7;
+                if (hasSuspiciousDomain) probReal -= 0.4;
+
+                citations = [
+                    { title: "Domain Reputation Index 2024 (DNSWatch)", uri: "https://domaintrust.io/mock-report" },
+                    { title: "WHOIS Database Lookup for Registration Date", uri: "https://whois.com/mock-lookup" },
+                ];
+            } else if (type === 'image') {
+                const isPlaceholder = content.includes('placehold.co');
+                probReal = isPlaceholder ? 0.45 : 0.6; 
+
+                citations = [
+                    { title: "Reverse Image Search Results (Simulated)", uri: "https://tineye.com/mock-search" },
+                    { title: "AI Visual Tampering Assessment (Gemini API Mock)", uri: "https://gemini.api/mock-visual-analysis" },
+                ];
+            } else if (type === 'video') {
+                const urlIsSocial = content.includes('youtube.com') || content.includes('twitter.com') || content.includes('tiktok.com');
+                probReal = urlIsSocial ? 0.45 : 0.6;
+
+                citations = [
+                    { title: "Deepfake Detection Algorithm Report (Simulated)", uri: "https://deepfake-labs.io/mock-video-report" },
+                    { title: "Transcript Consistency Check (AI Transcribe Mock)", uri: "https://ai-transcribe.com/mock-transcript" },
+                ];
+            }
+
+            probReal = Math.max(0.05, Math.min(0.95, probReal));
+            const prediction = probReal >= 0.5 ? 1 : 0;
+            
+            return { prediction, confidence: probReal, type: type, citations, rawContent: content };
+        }
+        
+        // --- Display Functions ---
+
+        function displayResult(result) {
+            const { prediction, confidence, type, citations, rawContent } = result;
+            const isReal = prediction === 1;
+            const label = isReal ? "REAL" : "FAKE";
+            const color = isReal ? "text-green-400" : "text-red-400";
+            const border = isReal ? "border-green-400" : "border-red-400";
+            const icon = isReal ? "✅" : "❌";
+            const confidencePercent = (confidence * 100).toFixed(2) + "%";
+
+            let verdictMessage = `**Stylistic and Domain Analysis:** The model analyzed the content quality and source credibility.`;
+            let message = isReal 
+                ? `The language analysis suggests this content is likely **authentic and factual**. It lacks common deceptive markers.`
+                : `The analysis suggests this content contains **misinformation or is fabricated**. It shows signs of sensationalism or stylistic inconsistencies.`;
+            
+            let fakinessScore = (100 - (confidence * 100)).toFixed(2) + "%";
+
+            let fakinessDisplay = prediction === 0 
+                ? `<span class="text-xl font-bold text-red-400 block mt-2">Fakiness Score: ${fakinessScore}</span>` 
+                : '';
+
+            resultArea.innerHTML = `
+                <div class="app-card p-6 sm:p-8 rounded-xl border ${border}">
+                    <h3 class="text-3xl font-extrabold text-center mb-4 ${color}">
+                        ${icon} FINAL VERDICT: ${label} ${icon}
+                    </h3>
+                    <div class="text-center mb-6">
+                        <span class="text-xl font-bold ${isReal ? 'text-green-400' : 'text-stone-400'}">Confidence Score: ${confidencePercent}</span>
+                        ${fakinessDisplay}
+                    </div>
+                    <p class="text-center text-stone-300 italic mb-4">
+                        ${verdictMessage}
+                    </p>
+                    <p class="text-center text-stone-400">
+                        ${message} 
+                        <span class="block mt-4 font-medium text-lg">Always verify critical information through multiple trusted, independent sources.</span>
+                    </p>
+                    ${type === 'text' ? `<div class="text-center mt-6">
+                        <button id="ai-claims-button" data-content="${rawContent.substring(0, 500).replace(/"/g, '&quot;')}" class="bg-indigo-700 hover:bg-indigo-600 text-white py-2 px-4 rounded-lg text-sm font-semibold transition">
+                            ✨ Summarize & Extract Claims (Gemini AI)
+                        </button>
+                    </div>` : ''}
+                </div>
+            `;
+            // Scroll to result area
+            resultArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            displayTechnicalDetails(type, rawContent);
+            displayCitations(citations, prediction); // Display the proof/citations
+            
+            if (type === 'text') {
+                document.getElementById('ai-claims-button').addEventListener('click', handleAiClaimsExtraction);
+            }
+        }
+
+        function displayTechnicalDetails(type, content) {
+            let detailsContent = '';
+            let title = '';
+
+            if (type === 'text') {
+                const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
+                const sensationalWords = ["shocking", "bombshell", "must-see", "disaster", "urgent alert", "massive cover-up", "fake news", "secretly", "experts agree", "share this immediately", "reveals all", "exposed", "scandal", "breaking now", "lie", "fraud"];
+                const sensationalCount = sensationalWords.filter(word => content.toLowerCase().includes(word)).length;
+                title = 'Text Analysis Metrics';
+                detailsContent = `
+                    <p><strong>Input Type:</strong> Text Content</p>
+                    <p><strong>Word Count:</strong> ${wordCount} words</p>
+                    <p><strong>Sensational Keywords Found:</strong> ${sensationalCount} occurrences. (Higher count = Lower Trust)</p>
+                `;
+            } else if (type === 'url') {
+                title = 'URL Analysis Metrics (Mock)';
+                detailsContent = `
+                    <p><strong>Input Type:</strong> Article Link</p>
+                    <p><strong>URL:</strong> <span class="break-all">${content}</span></p>
+                    <p><strong>Domain Checked:</strong> Simulated Reputation Check (High/Low)</p>
+                `;
+            } else {
+                title = `${type.charAt(0).toUpperCase() + type.slice(1)} Analysis (API Simulation)`;
+                detailsContent = `
+                    <p><strong>Input Type:</strong> ${type.charAt(0).toUpperCase() + type.slice(1)} URL</p>
+                    <p><strong>Full URL:</strong> <span class="break-all">${content}</span></p>
+                    <p><strong>Required Backend:</strong> Multimodal API (e.g., Gemini) for visual/audio context.</p>
+                `;
+            }
+
+            const detailsHtml = `
+                <div class="app-card p-6 rounded-xl mt-6 border border-stone-700">
+                    <details class="group">
+                        <summary class="flex justify-between items-center font-bold text-lg cursor-pointer text-indigo-300 hover:text-indigo-400 transition">
+                            🔬 ${title}
+                            <svg class="h-5 w-5 transform group-open:rotate-180 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </summary>
+                        <div class="mt-4 text-stone-400 space-y-3">
+                            ${detailsContent}
+                            <p class="text-sm text-stone-500 mt-4"><strong>Model Note:</strong> This version uses simplified heuristics to demonstrate rapid content scoring.</p>
+                        </div>
+                    </details>
+                </div>
+            `;
+            resultArea.insertAdjacentHTML('beforeend', detailsHtml);
+        }
+        
+        // --- New Function for Citations (Proof) ---
+        function displayCitations(sources, prediction) {
+            const titleText = prediction === 1 ? 'Grounding Sources (Verification)' : 'Grounding Sources (Contradictions)';
+            const sourcesHtml = `
+                <div class="app-card p-6 rounded-xl mt-6 border border-stone-700">
+                    <h4 class="text-xl font-bold text-indigo-300 mb-4 border-b border-stone-800 pb-2">
+                        ${titleText}
+                    </h4>
+                    <ul class="list-none space-y-2">
+                        ${sources.map(source => `
+                            <li class="flex items-start text-sm text-stone-400">
+                                <span class="mr-2 text-indigo-400">•</span>
+                                <a href="${source.uri}" target="_blank" class="text-indigo-400 hover:text-indigo-300 transition underline break-words">
+                                    ${source.title}
+                                </a>
+                            </li>
+                        `).join('')}
+                    </ul>
+                    <p class="text-xs text-stone-500 mt-4">
+                        These simulated links represent the external data (e.g., fact-checks, reputation reports) used to generate the analysis score.
+                    </p>
+                </div>
+            `;
+            resultArea.insertAdjacentHTML('beforeend', sourcesHtml);
+        }
+
+        // --- Gemini AI Claims Extraction Handler ---
+        async function handleAiClaimsExtraction(event) {
+            const button = event.target;
+            const originalContent = button.getAttribute('data-content');
+            
+            button.disabled = true;
+            button.innerHTML = 'Analyzing with AI...';
+
+            const systemPrompt = "You are a neutral fact-checking assistant. Your task is to analyze the provided article text. First, provide a concise, neutral summary (2-3 sentences). Second, extract exactly 3 distinct, verifiable factual claims made in the text. Your response MUST be in JSON format only.";
+            
+            const userQuery = `Analyze the following article text for claims and summary: "${originalContent}"`;
+
+            const schema = {
+                type: "OBJECT",
+                properties: {
+                    "summary": { "type": "STRING", "description": "A neutral, 2-3 sentence summary of the article." },
+                    "claims": { 
+                        "type": "ARRAY",
+                        "items": { "type": "STRING", "description": "A distinct, verifiable factual claim." }
+                    }
+                },
+                propertyOrdering: ["summary", "claims"]
+            };
+
+            const aiResponse = await fetchGeminiStructured(userQuery, schema);
+
+            button.disabled = false;
+            button.innerHTML = '✨ Summarize & Extract Claims (Gemini AI)';
+
+            const claimsHtml = `
+                <div class="app-card p-6 rounded-xl mt-6 border border-stone-600">
+                    <h4 class="text-xl font-bold text-indigo-400 mb-3">AI Claim & Summary Report</h4>
+                    ${aiResponse ? `
+                        <h5 class="font-semibold text-stone-200 mt-4">Neutral Summary:</h5>
+                        <p class="text-stone-400 text-sm mb-4">${aiResponse.summary}</p>
+                        
+                        <h5 class="font-semibold text-stone-200 mt-4">Key Verifiable Claims:</h5>
+                        <ul class="list-disc list-inside space-y-1 text-stone-400 text-sm">
+                            ${aiResponse.claims.map(claim => `<li>${claim}</li>`).join('')}
+                        </ul>
+                        <p class="text-xs text-stone-500 mt-4">Use these claims to perform precise, independent fact checks.</p>
+                    ` : `
+                        <p class="text-red-500">Error: Could not retrieve structured analysis from the AI. Check console for details.</p>
+                    `}
+                </div>
+            `;
+            resultArea.insertAdjacentHTML('beforeend', claimsHtml);
+        }
+        
+        // --- Event Handlers ---
+
+        analyzeButton.addEventListener('click', () => {
+            let content = '';
+            
+            // Get content based on active input type
+            if (currentInputType === 'text') content = newsInput.value.trim();
+            else if (currentInputType === 'url') content = urlInput.value.trim();
+            else if (currentInputType === 'image') content = imageInput.value.trim();
+            else if (currentInputType === 'video') content = videoInput.value.trim();
+
+            if (content === '') {
+                // Simple error display below button
+                let errorMessage = document.getElementById('error-message');
+                if (!errorMessage) {
+                    errorMessage = document.createElement('p');
+                    errorMessage.id = 'error-message';
+                    errorMessage.className = 'text-red-500 mt-3 text-center';
+                    analyzeButton.closest('div').insertAdjacentElement('afterend', errorMessage);
+                }
+                errorMessage.innerHTML = `⚠️ Please enter content in the **${currentInputType.toUpperCase()}** field before analyzing.`;
+                return;
+            }
+            const errorMessage = document.getElementById('error-message');
+            if (errorMessage) errorMessage.remove();
+
+            // 1. Show Loading
+            loadingArea.classList.remove('hidden');
+            resultArea.classList.add('hidden');
+            resultArea.innerHTML = ''; // Clear old results
+
+            // 2. Simulate Delay for Analysis (2 seconds)
+            setTimeout(() => {
+                loadingArea.classList.add('hidden');
+                resultArea.classList.remove('hidden');
+
+                // 3. Get Prediction
+                const result = detectFakeNews(currentInputType, content);
+
+                // 4. Display Result
+                displayResult(result);
+            }, 2000); 
+        });
+
+        // --- Example Loader ---
+        window.loadExample = (isReal) => {
+            const fakeText = "URGENT ALERT: Scientists confirm that drinking lemon water at exactly 3:00 AM reverses aging completely. The findings were based on a study of a single mouse, but experts agree this is the MOST SHOCKING discovery of the decade! Share this immediately!";
+            const realText = "On Thursday, the Federal Reserve announced it would keep its benchmark interest rate target unchanged, holding steady in the range of 5.25% to 5.50%. This decision follows a period of stable inflation data and a tightening labor market, suggesting a cautious but optimistic outlook on economic recovery.";
+            
+            // Ensure we are on the text tab for the examples
+            switchInputMode('text');
+            
+            newsInput.value = isReal ? realText : fakeText;
+            newsInput.focus();
+            
+            // Clear result/loading areas if they were showing
+            loadingArea.classList.add('hidden');
+            resultArea.classList.add('hidden');
+        };
+
+        // --- AI Assistant Logic ---
+
+        aiAgentButton.addEventListener('click', () => {
+            chatWindow.classList.toggle('hidden');
+            if (!chatWindow.classList.contains('hidden')) {
+                chatBody.scrollTop = chatBody.scrollHeight; // Scroll to bottom on open
+                chatInputText.focus();
+            }
+        });
+
+        chatInputText.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                processUserChat();
+            }
+        });
+
+        chatSendButton.addEventListener('click', processUserChat);
+
+        async function processUserChat() {
+            const userQuery = chatInputText.value.trim();
+            if (!userQuery) return;
+
+            // 1. Display user message
+            appendMessage('user', userQuery);
+            chatInputText.value = '';
+
+            // 2. Simulate AI Typing
+            const typingIndicator = appendMessage('ai', '...');
+
+            const systemPrompt = "You are the News Shield AI Assistant, a friendly expert on media literacy and fact-checking. Keep responses concise and focused on verification, platform usage, or misinformation risks. Use Google Search to provide grounded answers.";
+            
+            // 3. Fetch real Gemini response
+            const aiResponse = await fetchGemini(systemPrompt, userQuery);
+
+            // 4. Replace indicator with actual response
+            typingIndicator.innerHTML = aiResponse; 
+            
+            chatBody.scrollTop = chatBody.scrollHeight; 
+        }
+
+        function appendMessage(sender, text) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${sender === 'user' ? 'justify-end' : 'justify-start'}`;
+            
+            const bubble = document.createElement('div');
+            bubble.className = `p-3 rounded-xl max-w-[85%] text-sm break-words ${sender === 'user' ? 'chat-message-user text-white' : 'chat-message-ai text-stone-100'}`;
+            bubble.innerHTML = text;
+
+            if (sender === 'ai' && text === '...') {
+                 // Simple pulsate animation for mock typing
+                bubble.classList.add('pulsate');
+            }
+
+            messageDiv.appendChild(bubble);
+            chatBody.appendChild(messageDiv);
+            chatBody.scrollTop = chatBody.scrollHeight; // Auto-scroll
+            return bubble;
+        }
+
+        // Initial setup
+        document.addEventListener('DOMContentLoaded', () => {
+            switchInputMode('text');
+        });
+    </script>
+</body>
+</html>
